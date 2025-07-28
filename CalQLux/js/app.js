@@ -6,22 +6,25 @@
 // Import modules
 import { initUI, toggleTheme } from './ui.js';
 import { 
-    initPointCalculations,
-    initAverageCalculations,
-    initCoefficientCalculations,
-    initUniformityCalculations,
-    initLuminanceCalculations,
+    // Calculation functions
     calculatePointByPoint,
     calculateAverageIlluminance,
     calculateCoefficientUtilization,
     calculateUniformity,
-    calculateLuminance
+    calculateLuminance,
+    // Initialization functions (these might need to be created if they don't exist)
+    initPointCalculations,
+    initAverageCalculations,
+    initCoefficientCalculations,
+    initUniformityCalculations,
+    initLuminanceCalculations
 } from './calculations/index.js';
 import { 
+    // Visualization functions
     initCharts,
     initDiagrams,
     renderIlluminanceHeatmap,
-    renderIsolines as renderChartIsolines,
+    renderIsolines,
     render3DIlluminanceVisualization
 } from './visualization/index.js';
 
@@ -108,11 +111,19 @@ function savePreferences() {
  * Initialize calculation modules
  */
 function initCalculationModules() {
-    initPointCalculations(appState);
-    initAverageCalculations(appState);
-    initCoefficientCalculations(appState);
-    initUniformityCalculations(appState);
-    initLuminanceCalculations(appState);
+    console.log("Initializing calculation modules...");
+    try {
+        // Initialize calculation modules 
+        // (Note: these functions should come from calculations/index.js, not visualization/index.js)
+        initPointCalculations(appState);
+        initAverageCalculations(appState);
+        initCoefficientCalculations(appState);
+        initUniformityCalculations(appState);
+        initLuminanceCalculations(appState);
+        console.log("Calculation modules initialized successfully");
+    } catch (error) {
+        console.error("Error initializing calculation modules:", error);
+    }
 }
 
 /**
