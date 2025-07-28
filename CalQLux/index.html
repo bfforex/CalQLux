@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CalQLux - Illumination Design Calculator</title>
+    <link rel="stylesheet" href="css/normalize.css">
+    <link rel="stylesheet" href="css/styles.css">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap">
+    <script src="lib/chart.js" defer></script>
+    <script src="lib/ies-parser.js" defer></script>
+    <script type="module" src="js/app.js" defer></script>
+    <link rel="icon" type="image/svg+xml" href="assets/icons/favicon.svg">
+</head>
+<body>
+    <header class="app-header">
+        <div class="logo">
+            <img src="assets/icons/logo.svg" alt="CalQLux Logo">
+            <h1>CalQLux</h1>
+        </div>
+        <nav class="main-nav">
+            <ul>
+                <li><a href="#" class="active" data-view="calculator">Calculator</a></li>
+                <li><a href="#" data-view="projects">Projects</a></li>
+                <li><a href="#" data-view="library">Library</a></li>
+                <li><a href="#" data-view="help">Help</a></li>
+            </ul>
+        </nav>
+        <div class="header-actions">
+            <button id="settings-btn" class="icon-btn" title="Settings">
+                <span class="material-icons">settings</span>
+            </button>
+            <button id="theme-toggle" class="icon-btn" title="Toggle Dark Mode">
+                <span class="material-icons">dark_mode</span>
+            </button>
+        </div>
+    </header>
+
+    <main class="app-main">
+        <div class="sidebar">
+            <div class="calculation-type">
+                <h3>Calculation Type</h3>
+                <ul class="calc-type-list">
+                    <li><button class="calc-btn active" data-calc="point-by-point">Point-by-Point</button></li>
+                    <li><button class="calc-btn" data-calc="average">Average Illuminance</button></li>
+                    <li><button class="calc-btn" data-calc="utilization">Coefficient of Utilization</button></li>
+                    <li><button class="calc-btn" data-calc="uniformity">Uniformity Ratio</button></li>
+                    <li><button class="calc-btn" data-calc="luminance">Luminance</button></li>
+                </ul>
+            </div>
+
+            <div class="luminaire-library">
+                <h3>Luminaire Library</h3>
+                <div class="library-actions">
+                    <button class="btn-secondary" id="import-ies">Import IES</button>
+                    <button class="btn-secondary" id="browse-library">Browse</button>
+                </div>
+                <ul class="luminaire-list">
+                    <li class="luminaire-item active">Default Luminaire</li>
+                    <!-- More luminaires will be added dynamically -->
+                </ul>
+            </div>
+        </div>
+
+        <div class="content-area">
+            <div class="input-panel">
+                <div class="panel-header">
+                    <h2>Input Parameters</h2>
+                    <button id="preset-btn" class="btn-secondary">Load Preset</button>
+                </div>
+
+                <!-- Point-by-Point Calculation Form (default view) -->
+                <form id="point-by-point-form" class="calc-form active">
+                    <div class="form-section">
+                        <h3>Room Dimensions</h3>
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label for="room-length">Length:</label>
+                                <div class="input-with-unit">
+                                    <input type="number" id="room-length" value="10" min="0" step="0.1" required>
+                                    <select id="room-length-unit">
+                                        <option value="m">m</option>
+                                        <option value="ft">ft</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label for="room-width">Width:</label>
+                                <div class="input-with-unit">
+                                    <input type="number" id="room-width" value="8" min="0" step="0.1" required>
+                                    <select id="room-width-unit">
+                                        <option value="m">m</option>
+                                        <option value="ft">ft</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label for="ceiling-height">Ceiling Height:</label>
+                                <div class="input-with-unit">
+                                    <input type="number" id="ceiling-height" value="3" min="0" step="0.1" required>
+                                    <select id="ceiling-height-unit">
+                                        <option value="m">m</option>
+                                        <option value="ft">ft</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label for="work-plane-height">Work Plane Height:</label>
+                                <div class="input-with-unit">
+                                    <input type="number" id="work-plane-height" value="0.8" min="0" step="0.1" required>
+                                    <select id="work-plane-height-unit">
+                                        <option value="m">m</option>
+                                        <option value="ft">ft</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-section">
+                        <h3>Surface Reflectances</h3>
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label for="ceiling-refl">Ceiling:</label>
+                                <div class="input-with-unit">
+                                    <input type="number" id="ceiling-refl" value="70" min="0" max="100" step="1" required>
+                                    <span class="unit">%</span>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label for="wall-refl">Walls:</label>
+                                <div class="input-with-unit">
+                                    <input type="number" id="wall-refl" value="50" min="0" max="100" step="1" required>
+                                    <span class="unit">%</span>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label for="floor-refl">Floor:</label>
+                                <div class="input-with-unit">
+                                    <input type="number" id="floor-refl" value="20" min="0" max="100" step="1" required>
+                                    <span class="unit">%</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-section">
+                        <h3>Luminaire Configuration</h3>
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label for="luminaire-layout">Layout Pattern:</label>
+                                <select id="luminaire-layout">
+                                    <option value="regular">Regular Grid</option>
+                                    <option value="perimeter">Perimeter</option>
+                                    <option value="custom">Custom</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="luminaire-rows">Rows:</label>
+                                <input type="number" id="luminaire-rows" value="3" min="1" step="1" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="luminaire-columns">Columns:</label>
+                                <input type="number" id="luminaire-columns" value="3" min="1" step="1" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="luminaire-height">Mounting Height:</label>
+                                <div class="input-with-unit">
+                                    <input type="number" id="luminaire-height" value="2.8" min="0" step="0.1" required>
+                                    <select id="luminaire-height-unit">
+                                        <option value="m">m</option>
+                                        <option value="ft">ft</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="custom-layout" style="display: none;">
+                            <h4>Custom Layout</h4>
+                            <div id="custom-layout-editor">
+                                <!-- Interactive layout editor will be rendered here -->
+                            </div>
+                            <div class="layout-actions">
+                                <button type="button" id="add-luminaire" class="btn-secondary">Add Luminaire</button>
+                                <button type="button" id="clear-layout" class="btn-secondary">Clear All</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-section">
+                        <h3>Calculation Grid</h3>
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label for="grid-spacing">Grid Spacing:</label>
+                                <div class="input-with-unit">
+                                    <input type="number" id="grid-spacing" value="0.5" min="0.1" step="0.1" required>
+                                    <select id="grid-spacing-unit">
+                                        <option value="m">m</option>
+                                        <option value="ft">ft</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-actions">
+                        <button type="submit" class="btn-primary">Calculate</button>
+                        <button type="button" class="btn-secondary" id="reset-form">Reset</button>
+                    </div>
+                </form>
+
+                <!-- Other calculation forms will be added and toggled via JavaScript -->
+            </div>
+
+            <div class="results-panel">
+                <div class="panel-header">
+                    <h2>Results</h2>
+                    <div class="results-actions">
+                        <button id="export-pdf" class="btn-secondary" disabled>Export PDF</button>
+                        <button id="export-csv" class="btn-secondary" disabled>Export CSV</button>
+                    </div>
+                </div>
+
+                <div class="results-content empty">
+                    <div class="empty-state">
+                        <img src="assets/icons/calculator.svg" alt="Calculator">
+                        <p>Enter parameters and click Calculate to see results</p>
+                    </div>
+
+                    <div class="results-summary" style="display: none;">
+                        <div class="summary-cards">
+                            <div class="summary-card">
+                                <h3>Average Illuminance</h3>
+                                <div class="value">0 <span class="unit">lx</span></div>
+                            </div>
+                            <div class="summary-card">
+                                <h3>Min Illuminance</h3>
+                                <div class="value">0 <span class="unit">lx</span></div>
+                            </div>
+                            <div class="summary-card">
+                                <h3>Max Illuminance</h3>
+                                <div class="value">0 <span class="unit">lx</span></div>
+                            </div>
+                            <div class="summary-card">
+                                <h3>Uniformity (Min/Avg)</h3>
+                                <div class="value">0</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="visualization-tabs" style="display: none;">
+                        <div class="tab-headers">
+                            <button class="tab-btn active" data-tab="illuminance-map">Illuminance Map</button>
+                            <button class="tab-btn" data-tab="isolines">Isolines</button>
+                            <button class="tab-btn" data-tab="3d-view">3D View</button>
+                            <button class="tab-btn" data-tab="data-grid">Data Grid</button>
+                        </div>
+
+                        <div class="tab-content">
+                            <div class="tab-panel active" id="illuminance-map">
+                                <canvas id="illuminance-canvas"></canvas>
+                                <div class="color-scale">
+                                    <!-- Color scale will be generated dynamically -->
+                                </div>
+                            </div>
+                            <div class="tab-panel" id="isolines">
+                                <canvas id="isolines-canvas"></canvas>
+                            </div>
+                            <div class="tab-panel" id="3d-view">
+                                <div id="3d-container"></div>
+                            </div>
+                            <div class="tab-panel" id="data-grid">
+                                <div class="data-grid-container">
+                                    <table id="results-table">
+                                        <!-- Results table will be generated dynamically -->
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <footer class="app-footer">
+        <p>&copy; 2025 CalQLux - Illumination Design Calculator</p>
+        <div class="footer-links">
+            <a href="#" data-view="about">About</a>
+            <a href="#" data-view="privacy">Privacy Policy</a>
+            <a href="#" data-view="contact">Contact</a>
+        </div>
+    </footer>
+
+    <!-- Modal templates -->
+    <div class="modal" id="preset-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Load Preset</h2>
+                <button class="close-btn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="preset-list">
+                    <!-- Presets will be loaded dynamically -->
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-secondary close-modal">Cancel</button>
+                <button class="btn-primary" id="load-preset-confirm">Load</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="toast-container" id="toasts">
+        <!-- Toast notifications will be created dynamically -->
+    </div>
+</body>
+</html>
