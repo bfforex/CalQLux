@@ -10,11 +10,19 @@ import {
     initAverageCalculations,
     initCoefficientCalculations,
     initUniformityCalculations,
-    initLuminanceCalculations
+    initLuminanceCalculations,
+    calculatePointByPoint,
+    calculateAverageIlluminance,
+    calculateCoefficientUtilization,
+    calculateUniformity,
+    calculateLuminance
 } from './calculations/index.js';
 import { 
     initCharts,
-    initDiagrams
+    initDiagrams,
+    renderIlluminanceHeatmap,
+    renderIsolines as renderChartIsolines,
+    render3DIlluminanceVisualization
 } from './visualization/index.js';
 
 // Application state
@@ -152,6 +160,33 @@ function setupEventListeners() {
     
     // Import IES
     document.getElementById('import-ies').addEventListener('click', importIESFile);
+    
+    // Tab navigation for results
+    document.querySelectorAll('.tab-btn').forEach(tabBtn => {
+        tabBtn.addEventListener('click', (e) => {
+            // Remove active class from all tab buttons
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            
+            // Add active class to clicked button
+            e.target.classList.add('active');
+            
+            // Hide all tab panels
+            document.querySelectorAll('.tab-panel').forEach(panel => {
+                panel.classList.remove('active');
+            });
+            
+            // Show selected panel
+            const tabId = e.target.dataset.tab;
+            document.getElementById(tabId).classList.add('active');
+            
+            // Re-render the active tab if we have results
+            if (appState.calculationResults) {
+                renderTabContent(tabId, appState.calculationResults);
+            }
+        });
+    });
 }
 
 /**
@@ -246,16 +281,16 @@ function handleFormSubmit(e) {
                     results = calculatePointByPoint(formData);
                     break;
                 case 'average':
-                    results = { average: 350, min: 120, max: 580, uniformity: 0.34 };
+                    results = calculateAverageIlluminance(formData);
                     break;
                 case 'utilization':
-                    results = { average: 320, min: 100, max: 520, uniformity: 0.31 };
+                    results = calculateCoefficientUtilization(formData);
                     break;
                 case 'uniformity':
-                    results = { average: 380, min: 200, max: 560, uniformity: 0.53 };
+                    results = calculateUniformity(formData);
                     break;
                 case 'luminance':
-                    results = { average: 250, min: 80, max: 420, uniformity: 0.32 };
+                    results = calculateLuminance(formData);
                     break;
                 default:
                     throw new Error('Unknown calculation type');
@@ -301,125 +336,237 @@ function getFormData() {
             height: parseFloat(document.getElementById('ceiling-height').value),
             heightUnit: document.getElementById('ceiling-height-unit').value
         },
-        workPlane: {
+        workplane: {
             height: parseFloat(document.getElementById('work-plane-height').value),
             heightUnit: document.getElementById('work-plane-height-unit').value
         },
         reflectances: {
-            ceiling: parseFloat(document.getElementById('ceiling-refl').value) / 100,
-            walls: parseFloat(document.getElementById('wall-refl').value) / 100,
-            floor: parseFloat(document.getElementById('floor-refl').value) / 100
+            ceiling: parseFloat(document.getElementById('ceiling-refl').value),
+            walls: parseFloat(document.getElementById('wall-refl').value),
+            floor: parseFloat(document.getElementById('floor-refl').value)
         },
         luminaires: {
             layout: document.getElementById('luminaire-layout').value,
             rows: parseInt(document.getElementById('luminaire-rows').value),
             columns: parseInt(document.getElementById('luminaire-columns').value),
             height: parseFloat(document.getElementById('luminaire-height').value),
-            heightUnit: document.getElementById('luminaire-height-unit').value
+            heightUnit: document.getElementById('luminaire-height-unit').value,
+            suspensionHeight: 0, // Default value
+            flux: 5000 // Default luminous flux in lumens
         },
         calculation: {
             gridSpacing: parseFloat(document.getElementById('grid-spacing').value),
             gridSpacingUnit: document.getElementById('grid-spacing-unit').value
+        },
+        observation: {
+            surface: 'workplane' // Default observation surface
         }
     };
 }
 
 /**
- * Simulate point-by-point calculation
- * @param {Object} formData - Form data
- * @returns {Object} - Calculation results
+ * Reset the calculation form
+ * @param {Event} e - Click event
  */
-function calculatePointByPoint(formData) {
-    console.log('Performing point-by-point calculation with data:', formData);
+function resetForm(e) {
+    e.preventDefault();
     
-    // Convert all dimensions to meters if needed
-    const lengthM = formData.room.lengthUnit === 'ft' ? formData.room.length * 0.3048 : formData.room.length;
-    const widthM = formData.room.widthUnit === 'ft' ? formData.room.width * 0.3048 : formData.room.width;
-    const gridSpacingM = formData.calculation.gridSpacingUnit === 'ft' ? 
-        formData.calculation.gridSpacing * 0.3048 : formData.calculation.gridSpacing;
+    // Get current form
+    const formId = `${appState.currentCalculationType}-form`;
+    const form = document.getElementById(formId) || document.getElementById('point-by-point-form');
     
-    // Calculate number of grid points
-    const xPoints = Math.floor(lengthM / gridSpacingM) + 1;
-    const yPoints = Math.floor(widthM / gridSpacingM) + 1;
+    // Reset form
+    form.reset();
     
-    // Generate simulated illuminance grid
-    const illuminanceGrid = [];
-    let totalIlluminance = 0;
-    let minIlluminance = Number.MAX_VALUE;
-    let maxIlluminance = 0;
+    // Hide results
+    document.querySelector('.results-content').classList.add('empty');
+    document.querySelector('.empty-state').style.display = 'block';
+    document.querySelector('.results-summary').style.display = 'none';
+    document.querySelector('.visualization-tabs').style.display = 'none';
     
-    for (let y = 0; y < yPoints; y++) {
-        const row = [];
-        for (let x = 0; x < xPoints; x++) {
-            // Calculate position in space (0-1 normalized)
-            const xPos = x / (xPoints - 1);
-            const yPos = y / (yPoints - 1);
-            
-            // Simulate illuminance distribution - cosine falloff from center
-            const centerX = 0.5;
-            const centerY = 0.5;
-            const distFromCenter = Math.sqrt(Math.pow(xPos - centerX, 2) + Math.pow(yPos - centerY, 2));
-            
-            // Base illuminance at center (500 lux)
-            const baseIlluminance = 500;
-            
-            // Calculate illuminance with inverse square law approximation
-            // and multiple light sources based on luminaire configuration
-            let totalPointIlluminance = 0;
-            
-            for (let lr = 0; lr < formData.luminaires.rows; lr++) {
-                for (let lc = 0; lc < formData.luminaires.columns; lc++) {
-                    // Normalized luminaire position
-                    const lxPos = (lc + 0.5) / formData.luminaires.columns;
-                    const lyPos = (lr + 0.5) / formData.luminaires.rows;
-                    
-                    // Distance from this point to luminaire
-                    const distToLuminaire = Math.sqrt(Math.pow(xPos - lxPos, 2) + Math.pow(yPos - lyPos, 2));
-                    
-                    // Inverse square law with cosine factor for distribution
-                    const luminaireContribution = baseIlluminance * 
-                        Math.cos(distToLuminaire * Math.PI * 0.8) / 
-                        (1 + 5 * distToLuminaire * distToLuminaire);
-                    
-                    totalPointIlluminance += Math.max(0, luminaireContribution);
-                }
-            }
-            
-            // Add some noise to make it look more realistic
-            const noise = Math.random() * 20 - 10;
-            const finalIlluminance = Math.round(totalPointIlluminance + noise);
-            
-            row.push(finalIlluminance);
-            
-            // Track min, max, and total
-            minIlluminance = Math.min(minIlluminance, finalIlluminance);
-            maxIlluminance = Math.max(maxIlluminance, finalIlluminance);
-            totalIlluminance += finalIlluminance;
-        }
-        illuminanceGrid.push(row);
+    // Disable export buttons
+    document.getElementById('export-pdf').disabled = true;
+    document.getElementById('export-csv').disabled = true;
+    
+    // Show toast notification
+    showToast('Form has been reset', 'info');
+}
+
+/**
+ * Handle theme toggle
+ * @param {Event} e - Click event
+ */
+function handleThemeToggle(e) {
+    // Toggle theme
+    appState.theme = appState.theme === 'light' ? 'dark' : 'light';
+    
+    // Apply theme
+    applyTheme();
+    
+    // Save preferences
+    savePreferences();
+}
+
+/**
+ * Apply current theme
+ */
+function applyTheme() {
+    document.body.classList.toggle('dark-theme', appState.theme === 'dark');
+    
+    // Update theme toggle button icon
+    const themeIcon = document.querySelector('#theme-toggle .material-icons');
+    if (themeIcon) {
+        themeIcon.textContent = appState.theme === 'dark' ? 'light_mode' : 'dark_mode';
+    }
+}
+
+/**
+ * Handle layout change
+ * @param {Event} e - Change event
+ */
+function handleLayoutChange(e) {
+    const customLayout = e.target.value === 'custom';
+    
+    // Toggle inputs for custom layout
+    document.getElementById('luminaire-rows').disabled = !customLayout;
+    document.getElementById('luminaire-columns').disabled = !customLayout;
+}
+
+/**
+ * Open preset modal
+ * @param {Event} e - Click event
+ */
+function openPresetModal(e) {
+    e.preventDefault();
+    document.getElementById('preset-modal').classList.add('active');
+}
+
+/**
+ * Close preset modal
+ * @param {Event} e - Click event
+ */
+function closePresetModal(e) {
+    e.preventDefault();
+    document.getElementById('preset-modal').classList.remove('active');
+}
+
+/**
+ * Export results as PDF
+ * @param {Event} e - Click event
+ */
+function exportPDF(e) {
+    e.preventDefault();
+    
+    // Check if we have results
+    if (!appState.calculationResults) {
+        showToast('No calculation results to export', 'error');
+        return;
     }
     
-    // Calculate average
-    const totalPoints = xPoints * yPoints;
-    const avgIlluminance = Math.round(totalIlluminance / totalPoints);
+    // Show toast notification for demo purposes
+    showToast('PDF export functionality is not implemented in this demo', 'info');
+}
+
+/**
+ * Export results as CSV
+ * @param {Event} e - Click event
+ */
+function exportCSV(e) {
+    e.preventDefault();
     
-    // Calculate uniformity ratio
-    const uniformity = parseFloat((minIlluminance / avgIlluminance).toFixed(2));
+    // Check if we have results
+    if (!appState.calculationResults) {
+        showToast('No calculation results to export', 'error');
+        return;
+    }
     
-    return {
-        grid: illuminanceGrid,
-        dimensions: {
-            xPoints,
-            yPoints,
-            gridSpacingM,
-            lengthM,
-            widthM
-        },
-        average: avgIlluminance,
-        min: minIlluminance,
-        max: maxIlluminance,
-        uniformity
-    };
+    // Get grid data
+    const { grid } = appState.calculationResults;
+    
+    // Create CSV content
+    let csv = 'data:text/csv;charset=utf-8,';
+    
+    // Add header row with X coordinates
+    csv += 'Y/X,';
+    for (let x = 0; x < grid[0].length; x++) {
+        csv += x + ',';
+    }
+    csv += '\r\n';
+    
+    // Add data rows
+    for (let y = 0; y < grid.length; y++) {
+        csv += y + ',';
+        for (let x = 0; x < grid[y].length; x++) {
+            csv += grid[y][x] + ',';
+        }
+        csv += '\r\n';
+    }
+    
+    // Create download link
+    const encodedUri = encodeURI(csv);
+    const link = document.createElement('a');
+    link.setAttribute('href', encodedUri);
+    link.setAttribute('download', 'calqlux_results.csv');
+    document.body.appendChild(link);
+    
+    // Trigger download
+    link.click();
+    
+    // Clean up
+    document.body.removeChild(link);
+    
+    // Show toast notification
+    showToast('Results exported as CSV', 'success');
+}
+
+/**
+ * Import IES file
+ * @param {Event} e - Click event
+ */
+function importIESFile(e) {
+    e.preventDefault();
+    
+    // Create file input
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.accept = '.ies';
+    
+    // Add event listener
+    fileInput.addEventListener('change', (evt) => {
+        if (evt.target.files.length === 0) {
+            return;
+        }
+        
+        const file = evt.target.files[0];
+        const reader = new FileReader();
+        
+        reader.onload = (e) => {
+            try {
+                // In a real implementation, this would parse the IES file
+                // and update the application state with the new luminaire data
+                console.log('IES file loaded:', file.name);
+                
+                // Show toast notification for demo purposes
+                showToast(`IES file "${file.name}" loaded successfully (parsing not implemented)`, 'success');
+                
+                // Add to luminaire list (demo)
+                const luminaireList = document.querySelector('.luminaire-list');
+                const newItem = document.createElement('li');
+                newItem.className = 'luminaire-item';
+                newItem.textContent = file.name;
+                luminaireList.appendChild(newItem);
+                
+            } catch (error) {
+                console.error('Error parsing IES file:', error);
+                showToast('Error parsing IES file', 'error');
+            }
+        };
+        
+        reader.readAsText(file);
+    });
+    
+    // Trigger file selection
+    fileInput.click();
 }
 
 /**
@@ -445,7 +592,7 @@ function displayResults(results) {
         `${results.max} <span class="unit">lx</span>`;
     
     summaryEl.querySelector('.summary-cards div:nth-child(4) .value').innerHTML = 
-        results.uniformity.toFixed(2);
+        results.uniformity;
     
     // Show visualization tabs
     document.querySelector('.visualization-tabs').style.display = 'block';
@@ -456,7 +603,7 @@ function displayResults(results) {
 }
 
 /**
- * Render content for the active tab
+ * Render tab content based on active tab
  * @param {string} tabId - ID of the active tab
  * @param {Object} results - Calculation results
  */
@@ -511,6 +658,26 @@ function renderIlluminanceMap(results) {
             // Draw grid lines
             ctx.strokeStyle = 'rgba(0, 0, 0, 0.1)';
             ctx.strokeRect(x * cellWidth, y * cellHeight, cellWidth, cellHeight);
+            
+            // Draw value if cells are large enough
+            if (cellWidth > 40 && cellHeight > 25) {
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+                ctx.fillRect(
+                    x * cellWidth + cellWidth/2 - 15, 
+                    y * cellHeight + cellHeight/2 - 7, 
+                    30, 14
+                );
+                
+                ctx.fillStyle = '#000';
+                ctx.font = '10px Arial';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(
+                    `${illuminance} lx`, 
+                    x * cellWidth + cellWidth/2, 
+                    y * cellHeight + cellHeight/2
+                );
+            }
         }
     }
     
@@ -519,96 +686,7 @@ function renderIlluminanceMap(results) {
 }
 
 /**
- * Generate color scale for illuminance map
- * @param {number} min - Minimum illuminance value
- * @param {number} max - Maximum illuminance value
- */
-function generateColorScale(min, max) {
-    const scaleContainer = document.querySelector('.color-scale');
-    scaleContainer.innerHTML = '';
-    
-    // Create 10 segments in the scale
-    const segments = 10;
-    const range = max - min;
-    
-    for (let i = 0; i < segments; i++) {
-        const value = min + (i / (segments - 1)) * range;
-        const color = getIlluminanceColor(value, min, max);
-        
-        const segment = document.createElement('div');
-        segment.style.flex = 1;
-        segment.style.backgroundColor = color;
-        
-        scaleContainer.appendChild(segment);
-    }
-    
-    // Add min and max labels
-    const minLabel = document.createElement('div');
-    minLabel.className = 'scale-label min';
-    minLabel.textContent = min + ' lx';
-    
-    const maxLabel = document.createElement('div');
-    maxLabel.className = 'scale-label max';
-    maxLabel.textContent = max + ' lx';
-    
-    scaleContainer.insertAdjacentElement('beforebegin', minLabel);
-    scaleContainer.insertAdjacentElement('afterend', maxLabel);
-}
-
-/**
- * Get color for illuminance value using a heatmap scale
- * @param {number} value - Illuminance value
- * @param {number} min - Minimum illuminance value
- * @param {number} max - Maximum illuminance value
- * @returns {string} - Color in hex format
- */
-function getIlluminanceColor(value, min, max) {
-    // Normalize value between 0 and 1
-    const normalized = (value - min) / (max - min);
-    
-    // Color stops from dark blue to red
-    const colors = [
-        { pos: 0.0, r: 13, g: 71, b: 161 },   // Dark blue
-        { pos: 0.25, r: 0, g: 151, b: 230 },  // Light blue
-        { pos: 0.5, r: 46, g: 204, b: 113 },  // Green
-        { pos: 0.75, r: 241, g: 196, b: 15 }, // Yellow
-        { pos: 1.0, r: 235, g: 59, b: 59 }    // Red
-    ];
-    
-    // Find the two color stops that surround the normalized value
-    let startColor, endColor;
-    let localPos;
-    
-    for (let i = 0; i < colors.length - 1; i++) {
-        if (normalized >= colors[i].pos && normalized <= colors[i + 1].pos) {
-            startColor = colors[i];
-            endColor = colors[i + 1];
-            localPos = (normalized - startColor.pos) / (endColor.pos - startColor.pos);
-            break;
-        }
-    }
-    
-    // If not found, use the extremes
-    if (!startColor) {
-        if (normalized <= 0) {
-            startColor = endColor = colors[0];
-            localPos = 0;
-        } else {
-            startColor = endColor = colors[colors.length - 1];
-            localPos = 1;
-        }
-    }
-    
-    // Interpolate between the two colors
-    const r = Math.round(startColor.r + localPos * (endColor.r - startColor.r));
-    const g = Math.round(startColor.g + localPos * (endColor.g - startColor.g));
-    const b = Math.round(startColor.b + localPos * (endColor.b - startColor.b));
-    
-    return `rgb(${r}, ${g}, ${b})`;
-}
-
-/**
- * Render isolines visualization
+ * Render isolines (contour lines)
  * @param {Object} results - Calculation results
  */
 function renderIsolines(results) {
@@ -622,45 +700,423 @@ function renderIsolines(results) {
     // Clear canvas
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     
-    // For demo purposes, draw some placeholder isolines
-    // In a real application, this would use a contour generation algorithm
-    
-    ctx.fillStyle = '#f0f0f0';
+    // Draw background
+    ctx.fillStyle = '#f8f8f8';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     
-    // Draw some example isolines
-    const isovalues = [
-        results.min,
-        results.min + (results.max - results.min) * 0.25,
-        results.min + (results.max - results.min) * 0.5,
-        results.min + (results.max - results.min) * 0.75,
-        results.max
-    ];
+    // Calculate cell size
+    const cellWidth = canvas.width / results.dimensions.xPoints;
+    const cellHeight = canvas.height / results.dimensions.yPoints;
     
-    ctx.strokeStyle = '#333';
-    ctx.lineWidth = 1;
+    // Determine contour levels (create 10 evenly spaced levels)
+    const levels = 10;
+    const interval = (results.max - results.min) / levels;
+    const contourLevels = [];
     
-    for (let i = 0; i < isovalues.length; i++) {
-        const value = isovalues[i];
-        const offsetPercent = i / (isovalues.length - 1);
-        
-        // Draw elliptical isoline (simplified representation)
-        ctx.beginPath();
-        const centerX = canvas.width / 2;
-        const centerY = canvas.height / 2;
-        const radiusX = (1 - offsetPercent * 0.8) * (canvas.width * 0.4);
-        const radiusY = (1 - offsetPercent * 0.8) * (canvas.height * 0.4);
-        
-        ctx.ellipse(centerX, centerY, radiusX, radiusY, 0, 0, 2 * Math.PI);
-        ctx.stroke();
-        
-        // Add value label
-        ctx.fillStyle = '#333';
-        ctx.font = '12px Arial';
-        ctx.fillText(`${Math.round(value)} lx`, centerX + radiusX * 0.7, centerY);
+    for (let i = 0; i <= levels; i++) {
+        contourLevels.push(results.min + i * interval);
     }
     
-    // Add note that this is a simplified visualization
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
-    ctx.font = '14px Arial';
-    ctx.fillText
+    // Draw contour lines
+    for (const level of contourLevels) {
+        ctx.beginPath();
+        ctx.strokeStyle = '#333';
+        ctx.lineWidth = 1;
+        
+        let firstPoint = true;
+        
+        // This is a simplified approach to contour generation
+        for (let y = 0; y < results.dimensions.yPoints - 1; y++) {
+            for (let x = 0; x < results.dimensions.xPoints - 1; x++) {
+                // Get the four corners of this grid cell
+                const z1 = results.grid[y][x];
+                const z2 = results.grid[y][x + 1];
+                const z3 = results.grid[y + 1][x + 1];
+                const z4 = results.grid[y + 1][x];
+                
+                // Check if contour passes through this cell
+                if ((z1 <= level && level <= z2) || (z2 <= level && level <= z1) || 
+                    (z2 <= level && level <= z3) || (z3 <= level && level <= z2) || 
+                    (z3 <= level && level <= z4) || (z4 <= level && level <= z3) || 
+                    (z4 <= level && level <= z1) || (z1 <= level && level <= z4)) {
+                    
+                    // Calculate cell center
+                    const centerX = (x + 0.5) * cellWidth;
+                    const centerY = (y + 0.5) * cellHeight;
+                    
+                    if (firstPoint) {
+                        ctx.moveTo(centerX, centerY);
+                        firstPoint = false;
+                    } else {
+                        ctx.lineTo(centerX, centerY);
+                    }
+                }
+            }
+        }
+        
+        ctx.stroke();
+        
+        // Add labels for contour levels
+        ctx.fillStyle = '#333';
+        ctx.font = '10px Arial';
+        ctx.textAlign = 'right';
+        ctx.textBaseline = 'middle';
+        
+        const y = canvas.height - (canvas.height * (level - results.min) / (results.max - results.min));
+        ctx.fillText(`${Math.round(level)} lx`, canvas.width - 10, y);
+    }
+    
+    // Draw room boundary
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(0, 0, canvas.width, canvas.height);
+}
+
+/**
+ * Render 3D view of illuminance distribution
+ * @param {Object} results - Calculation results
+ */
+function render3DView(results) {
+    const container = document.getElementById('3d-container');
+    container.innerHTML = '';
+    
+    // Create message about 3D visualization
+    const message = document.createElement('div');
+    message.style.textAlign = 'center';
+    message.style.padding = '10px';
+    
+    message.innerHTML = '<p>3D Illuminance Visualization</p>';
+    container.appendChild(message);
+    
+    // Create a canvas for the 3D view
+    const canvas = document.createElement('canvas');
+    canvas.width = container.clientWidth;
+    canvas.height = 400;
+    canvas.style.backgroundColor = '#f0f0f0';
+    canvas.style.borderRadius = '4px';
+    
+    const ctx = canvas.getContext('2d');
+    
+    // Clear the canvas
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    // Draw 3D visualization
+    const gridWidth = results.dimensions.xPoints;
+    const gridHeight = results.dimensions.yPoints;
+    
+    // Set up isometric projection parameters
+    const tileWidth = canvas.width / (gridWidth + gridHeight) * 0.7;
+    const tileHeight = tileWidth * 0.5;
+    const maxBarHeight = canvas.height * 0.5;
+    
+    // Center the visualization
+    const offsetX = canvas.width * 0.5;
+    const offsetY = canvas.height * 0.25;
+    
+    // Get min and max values for color scaling
+    const min = results.min;
+    const max = results.max;
+    
+    // Draw from back to front (reversed order)
+    for (let y = gridHeight - 1; y >= 0; y--) {
+        for (let x = 0; x < gridWidth; x++) {
+            const value = results.grid[y][x];
+            
+            // Scale illuminance value to bar height
+            const barHeight = (value / max) * maxBarHeight;
+            
+            // Calculate isometric position
+            const isoX = offsetX + (x - y) * tileWidth;
+            const isoY = offsetY + (x + y) * tileHeight;
+            
+            // Draw vertical bar
+            
+            // Top of bar (rhombus)
+            ctx.beginPath();
+            ctx.moveTo(isoX, isoY - barHeight);
+            ctx.lineTo(isoX + tileWidth, isoY - barHeight + tileHeight);
+            ctx.lineTo(isoX, isoY - barHeight + tileHeight * 2);
+            ctx.lineTo(isoX - tileWidth, isoY - barHeight + tileHeight);
+            ctx.closePath();
+            
+            // Fill with color based on illuminance
+            ctx.fillStyle = getIlluminanceColor(value, min, max);
+            ctx.fill();
+            
+            // Draw sides of bar
+            
+            // Left side
+            ctx.beginPath();
+            ctx.moveTo(isoX - tileWidth, isoY - barHeight + tileHeight);
+            ctx.lineTo(isoX - tileWidth, isoY + tileHeight);
+            ctx.lineTo(isoX, isoY + tileHeight * 2);
+            ctx.lineTo(isoX, isoY - barHeight + tileHeight * 2);
+            ctx.closePath();
+            ctx.fillStyle = shadeColor(getIlluminanceColor(value, min, max), -30);
+            ctx.fill();
+            
+            // Right side
+            ctx.beginPath();
+            ctx.moveTo(isoX + tileWidth, isoY - barHeight + tileHeight);
+            ctx.lineTo(isoX + tileWidth, isoY + tileHeight);
+            ctx.lineTo(isoX, isoY + tileHeight * 2);
+            ctx.lineTo(isoX, isoY - barHeight + tileHeight * 2);
+            ctx.closePath();
+            ctx.fillStyle = shadeColor(getIlluminanceColor(value, min, max), -15);
+            ctx.fill();
+            
+            // Draw outline
+            ctx.strokeStyle = 'rgba(0, 0, 0, 0.2)';
+            ctx.lineWidth = 0.5;
+            ctx.stroke();
+            
+            // Add label for high values
+            if (value > max * 0.8 && tileWidth > 25) {
+                ctx.fillStyle = '#fff';
+                ctx.font = '10px Arial';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(`${value} lx`, isoX, isoY - barHeight + tileHeight);
+            }
+        }
+    }
+    
+    // Draw legend
+    drawLegend(ctx, canvas.width, canvas.height, min, max);
+    
+    // Add to container
+    container.appendChild(canvas);
+}
+
+/**
+ * Render data grid showing illuminance values
+ * @param {Object} results - Calculation results
+ */
+function renderDataGrid(results) {
+    const container = document.querySelector('.data-grid-container');
+    const table = document.getElementById('results-table');
+    
+    // Clear existing table
+    table.innerHTML = '';
+    
+    // Create header row with coordinates
+    const headerRow = document.createElement('tr');
+    headerRow.appendChild(document.createElement('th')); // Empty corner cell
+    
+    // Column headers (X coordinates)
+    for (let x = 0; x < results.dimensions.xPoints; x++) {
+        const th = document.createElement('th');
+        const xCoord = (x * results.dimensions.gridSpacingM).toFixed(1);
+        th.textContent = `${xCoord}m`;
+        headerRow.appendChild(th);
+    }
+    
+    table.appendChild(headerRow);
+    
+    // Create data rows
+    for (let y = 0; y < results.dimensions.yPoints; y++) {
+        const row = document.createElement('tr');
+        
+        // Row header (Y coordinate)
+        const yHeader = document.createElement('th');
+        const yCoord = (y * results.dimensions.gridSpacingM).toFixed(1);
+        yHeader.textContent = `${yCoord}m`;
+        row.appendChild(yHeader);
+        
+        // Illuminance values
+        for (let x = 0; x < results.dimensions.xPoints; x++) {
+            const cell = document.createElement('td');
+            const value = results.grid[y][x];
+            
+            // Set cell text
+            cell.textContent = `${value} lx`;
+            
+            // Add color based on value (heatmap-like)
+            const normalizedValue = (value - results.min) / (results.max - results.min);
+            const bgColor = getIlluminanceColor(value, results.min, results.max);
+            cell.style.backgroundColor = bgColor;
+            
+            // Set text color based on background brightness
+            if (normalizedValue > 0.6) {
+                cell.style.color = '#fff';
+            }
+            
+            row.appendChild(cell);
+        }
+        
+        table.appendChild(row);
+    }
+    
+    // Add CSS styles for the table
+    table.style.borderCollapse = 'collapse';
+    table.style.width = '100%';
+    table.style.textAlign = 'center';
+    
+    const cells = table.querySelectorAll('td, th');
+    cells.forEach(cell => {
+        cell.style.padding = '4px';
+        cell.style.border = '1px solid #ddd';
+    });
+}
+
+/**
+ * Show toast notification
+ * @param {string} message - Notification message
+ * @param {string} type - Notification type (success, error, info)
+ */
+function showToast(message, type) {
+    const toastContainer = document.getElementById('toasts');
+    
+    // Create toast element
+    const toast = document.createElement('div');
+    toast.className = `toast ${type}`;
+    toast.textContent = message;
+    
+    // Add toast to container
+    toastContainer.appendChild(toast);
+    
+    // Set timeout to remove toast
+    setTimeout(() => {
+        toast.classList.add('hiding');
+        
+        setTimeout(() => {
+            toastContainer.removeChild(toast);
+        }, 300);
+    }, 3000);
+}
+
+/**
+ * Get color for illuminance value using a heatmap scale
+ * @param {number} value - Illuminance value
+ * @param {number} min - Minimum illuminance value
+ * @param {number} max - Maximum illuminance value
+ * @returns {string} - Color in hex format
+ */
+function getIlluminanceColor(value, min, max) {
+    // Normalize value between 0 and 1
+    const normalized = Math.max(0, Math.min(1, (value - min) / (max - min)));
+    
+    // Use a gradient from blue (low) to green (medium) to red (high)
+    let r, g, b;
+    
+    if (normalized < 0.5) {
+        // Blue to green (0 - 0.5)
+        const t = normalized * 2;
+        r = Math.round(0 * (1 - t) + 0 * t);
+        g = Math.round(0 * (1 - t) + 255 * t);
+        b = Math.round(255 * (1 - t) + 0 * t);
+    } else {
+        // Green to red (0.5 - 1.0)
+        const t = (normalized - 0.5) * 2;
+        r = Math.round(0 * (1 - t) + 255 * t);
+        g = Math.round(255 * (1 - t) + 0 * t);
+        b = Math.round(0 * (1 - t) + 0 * t);
+    }
+    
+    return `rgb(${r}, ${g}, ${b})`;
+}
+
+/**
+ * Helper function to shade a color
+ * @param {string} color - RGB color string
+ * @param {number} percent - Percent to lighten (positive) or darken (negative)
+ * @returns {string} - New color
+ */
+function shadeColor(color, percent) {
+    // Extract RGB components
+    const rgb = color.match(/\d+/g).map(Number);
+    
+    // Apply shading
+    const r = Math.max(0, Math.min(255, rgb[0] + (percent / 100) * rgb[0]));
+    const g = Math.max(0, Math.min(255, rgb[1] + (percent / 100) * rgb[1]));
+    const b = Math.max(0, Math.min(255, rgb[2] + (percent / 100) * rgb[2]));
+    
+    return `rgb(${Math.round(r)}, ${Math.round(g)}, ${Math.round(b)})`;
+}
+
+/**
+ * Draw a legend for the 3D visualization
+ * @param {CanvasRenderingContext2D} ctx - Canvas context
+ * @param {number} width - Canvas width
+ * @param {number} height - Canvas height
+ * @param {number} min - Minimum value
+ * @param {number} max - Maximum value
+ */
+function drawLegend(ctx, width, height, min, max) {
+    const legendWidth = 200;
+    const legendHeight = 20;
+    const legendX = width - legendWidth - 20;
+    const legendY = height - legendHeight - 20;
+    
+    // Draw color scale
+    const segments = 50;
+    const segmentWidth = legendWidth / segments;
+    
+    for (let i = 0; i < segments; i++) {
+        const value = min + (i / (segments - 1)) * (max - min);
+        const x = legendX + i * segmentWidth;
+        
+        ctx.fillStyle = getIlluminanceColor(value, min, max);
+        ctx.fillRect(x, legendY, segmentWidth, legendHeight);
+    }
+    
+    // Draw border
+    ctx.strokeStyle = '#333';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(legendX, legendY, legendWidth, legendHeight);
+    
+    // Draw min and max labels
+    ctx.fillStyle = '#333';
+    ctx.font = '12px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    
+    ctx.fillText(`${Math.round(min)} lx`, legendX, legendY + legendHeight + 5);
+    ctx.fillText(`${Math.round(max)} lx`, legendX + legendWidth, legendY + legendHeight + 5);
+}
+
+/**
+ * Generate color scale for illuminance map
+ * @param {number} min - Minimum illuminance value
+ * @param {number} max - Maximum illuminance value
+ */
+function generateColorScale(min, max) {
+    const scaleContainer = document.querySelector('.color-scale');
+    scaleContainer.innerHTML = '';
+    
+    // Create segments in the scale
+    const segments = 10;
+    const range = max - min;
+    
+    for (let i = 0; i < segments; i++) {
+        const value = min + (i / (segments - 1)) * range;
+        const color = getIlluminanceColor(value, min, max);
+        
+        const segment = document.createElement('div');
+        segment.style.flex = 1;
+        segment.style.backgroundColor = color;
+        segment.style.height = '20px';
+        
+        scaleContainer.appendChild(segment);
+    }
+    
+    // Add min and max labels
+    const minLabel = document.createElement('div');
+    minLabel.className = 'scale-label min';
+    minLabel.textContent = Math.round(min) + ' lx';
+    
+    const maxLabel = document.createElement('div');
+    maxLabel.className = 'scale-label max';
+    maxLabel.textContent = Math.round(max) + ' lx';
+    
+    // Clear previous labels
+    const oldLabels = document.querySelectorAll('.scale-label');
+    oldLabels.forEach(label => label.remove());
+    
+    // Add new labels
+    scaleContainer.parentNode.insertBefore(minLabel, scaleContainer);
+    scaleContainer.parentNode.appendChild(maxLabel);
+}
+
+// Initialize the application when the DOM is loaded
+document.addEventListener('DOMContentLoaded', initApp);
